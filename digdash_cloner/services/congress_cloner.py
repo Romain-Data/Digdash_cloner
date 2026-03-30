@@ -32,6 +32,7 @@ class CongressCloner:
         src_year: str,
         dst_year: str,
         csv_path_mode: str,  # "replace" | "keep" | "empty"
+        dst_congress: Optional[str] = None,
         verbose: bool = False,
     ) -> Optional[CloneResult]:
         """
@@ -47,10 +48,12 @@ class CongressCloner:
         db_root = backup.db_root
         ts = str(int(time.time() * 1000))
 
+        dst_congress = dst_congress or congress
+
         all_models = {m.get("id"): m for m in dm_root.findall("TableDataModel")}
         all_flows = wl_root.findall("Flow")
 
-        salt = f"{congress}{dst_year}"  # sel déterministe par congrès/année
+        salt = f"{dst_congress}{dst_year}"  # sel déterministe par congrès/année
 
         # ── 1. Identifier les flux à cloner ──────────────────────────────────────
         if congress:
@@ -136,7 +139,7 @@ class CongressCloner:
         log(f"[{label}] Modèles clonés : {len(cloned_models)}", verbose)
 
         # ── 5. Cloner les flux ────────────────────────────────────────────────────
-        dst_prefix = f"{congress}/{dst_year}/"
+        dst_prefix = f"{dst_congress}/{dst_year}/"
         cloned_flows = []
         for f, cat_name, dm_id in flows_to_clone:
             raw = ET.tostring(f, encoding="unicode")
@@ -150,7 +153,7 @@ class CongressCloner:
                     raw = raw.replace(f'dmId="{old}"', f'dmId="{new}"')
 
             if congress:
-                raw = raw.replace(f"{congress}/{src_year}/", f"{congress}/{dst_year}/")
+                raw = raw.replace(f"{congress}/{src_year}/", f"{dst_congress}/{dst_year}/")
             else:
                 raw = raw.replace(f"{src_year}/", f"{dst_year}/")
                 raw = raw.replace(f'Name="{src_year}"', f'Name="{dst_year}"')
@@ -194,6 +197,8 @@ class CongressCloner:
             for old, new in flow_uid_map.items():
                 raw = raw.replace(f'flowId="{old}"', f'flowId="{new}"')
             raw = raw.replace(src_year, dst_year)
+            if congress and dst_congress != congress:
+                raw = raw.replace(congress, dst_congress)
             d2 = ET.fromstring(raw)
             d2.set("lastedit", ts)
             cloned_pages.append(d2)

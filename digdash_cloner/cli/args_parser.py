@@ -8,6 +8,7 @@ import argparse
 
 DEFAULTS = {
     "congress": [],  # Congrès à cloner (vide = mode mono-congrès)
+    "dst_congress": None,  # Congrès cible (si renommage)
     "src_year": "2025",  # Année source
     "dst_year": "2026",  # Année cible
     "csv_path": "replace",  # "replace" | "keep" | "empty"
@@ -26,6 +27,15 @@ Exemples :
     python3 -m digdash_cloner \\
         --backup-zip  backup_source.zip \\
         --congress    EuroPCR \\
+        --src-year    2025 \\
+        --dst-year    2026 \\
+        --output      backup_clone.zip
+
+    # Copier PCRLondonValves/2025 → EuroPCR/2026 (renommage)
+    python3 -m digdash_cloner \\
+        --backup-zip  backup_source.zip \\
+        --congress    PCRLondonValves \\
+        --dst-congress EuroPCR \\
         --src-year    2025 \\
         --dst-year    2026 \\
         --output      backup_clone.zip
@@ -53,6 +63,11 @@ Exemples :
             "Omettez ce paramètre pour les rôles mono-congrès dont les catégories "
             "sont au format '{Année}/...' sans préfixe congrès."
         ),
+    )
+    p.add_argument(
+        "--dst-congress",
+        default=DEFAULTS["dst_congress"],
+        help="Nom du congrès cible (si différent du source, pour renommage)",
     )
     p.add_argument(
         "--src-year",
