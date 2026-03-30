@@ -7,7 +7,7 @@ name = "digdash-cloner"
 version = "1.0.0"
 description = "Clone une section d'un rôle DigDash d'une année vers une autre"
 readme = "README.md"
-requires-python = ">=3.6"
+requires-python = ">=3.7"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -20,8 +20,6 @@ dev = ["ruff"]
 
 [project.scripts]
 digdash-cloner = "digdash_cloner.main:main"
-ruff-check = "ruff:check"
-ruff-format = "ruff:format"
 
 [tool.setuptools.packages.find]
 where = ["."]
