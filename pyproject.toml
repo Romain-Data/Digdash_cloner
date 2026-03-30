@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "digdash-cloner"
+version = "1.0.0"
+description = "Clone une section d'un rôle DigDash d'une année vers une autre"
+readme = "README.md"
+requires-python = ">=3.6"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["ruff"]
+
+[project.scripts]
+digdash-cloner = "digdash_cloner.main:main"
+ruff-check = "ruff:check"
+ruff-format = "ruff:format"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py37"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "C90", "I", "N", "UP", "YTT", "S", "BLE", "FBT", "B", "A", "COM", "C4", "DTZ", "T10", "DJ", "EM", "EXE", "FA", "ISC", "ICN", "G", "INP", "PIE", "T20", "PYI", "PT", "Q", "RSE", "RET", "SLF", "SLOT", "SIM", "TID", "TCH", "INT", "ARG", "PTH", "ERA", "PD", "PGH", "PL", "TRY", "FLY", "NPY", "AIR", "PERF", "FURB", "LOG", "RUF"]
+ignore = ["E501", "S101", "PLR0913", "PLR0912", "PLR2004", "FBT001", "FBT002", "FBT003", "A003", "COM812", "ISC001", "ICN001", "G004", "PIE790", "T20", "RET504", "SLF001", "SIM108", "TID252", "ARG001", "ARG002", "PTH123", "ERA001", "PD", "PGH004", "PLR0915", "TRY003", "FLY002", "NPY002", "AIR", "PERF", "FURB", "LOG", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
