@@ -61,6 +61,8 @@ Exemples :
     )
     p.add_argument(
         "--dst-year",
+        "--dist-year",
+        dest="dst_year",
         default=DEFAULTS["dst_year"],
         help=f"Année cible (défaut : {DEFAULTS['dst_year']})",
     )

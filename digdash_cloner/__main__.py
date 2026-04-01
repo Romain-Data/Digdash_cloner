@@ -1,4 +1,8 @@
 # digdash_cloner/__main__.py
-from .main import main
+try:
+    from .main import main
+except ImportError:
+    from digdash_cloner.main import main
 
-main()
+if __name__ == "__main__":
+    main()
