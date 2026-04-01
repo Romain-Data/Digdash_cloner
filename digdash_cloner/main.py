@@ -25,11 +25,18 @@ def main():
     congress_display = (
         ", ".join(args.congress) if args.congress else "(mono-congrès, catégorie {Année}/...)"
     )
+    if args.dst_congress:
+        congress_display = f"{congress_display} → {args.dst_congress}"
     print(f"  Congrès  : {congress_display}")
     print(f"  Année    : {args.src_year} → {args.dst_year}")
     print(f"  Chemins  : {args.csv_path}")
     print(f"  Sortie   : {args.output}")
     print(f"{'═' * 60}\n")
+
+    # Validation
+    if args.dst_congress and len(args.congress) > 1:
+        print("❌ Erreur : --dst-congress ne peut être utilisé qu'avec un seul congrès source.")
+        sys.exit(1)
 
     # Injection de dépendances
     backup_loader = BackupLoader()
@@ -52,7 +59,10 @@ def main():
     clone_results = []
     congress_list = args.congress if args.congress else [""]
     for congress in congress_list:
+        dst_congress = args.dst_congress if args.dst_congress else congress
         label = congress if congress else "(mono-congrès)"
+        if args.dst_congress:
+            label += f" → {dst_congress}"
         print(f"\n  Congrès : {label}")
         result = congress_cloner.clone_congress(
             backup=backup,
@@ -60,6 +70,7 @@ def main():
             src_year=args.src_year,
             dst_year=args.dst_year,
             csv_path_mode=args.csv_path,
+            dst_congress=dst_congress,
             verbose=args.verbose,
         )
         clone_results.append(result)
@@ -74,7 +85,11 @@ def main():
     )
 
     # ── Validation ────────────────────────────────────────────────────────────
-    ok = backup_validator.validate_output(args.output, args.congress, args.dst_year)
+    congresses_to_validate = []
+    for congress in congress_list:
+        dst_congress = args.dst_congress if args.dst_congress else congress
+        congresses_to_validate.append(dst_congress)
+    ok = backup_validator.validate_output(args.output, congresses_to_validate, args.dst_year)
 
     # ── Résumé ────────────────────────────────────────────────────────────────
     print("\n── Résumé ──────────────────────────────────────────────────────────")

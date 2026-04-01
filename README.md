@@ -16,16 +16,29 @@ pip install -e .[dev]
 
 ## Utilisation
 
-```bash
-uv run python -m digdash_cloner \
-  --backup-zip backup_source.zip \
-  --congress EuroPCR \
-  --src-year 2025 \
-  --dst-year 2026 \
-  --output backup_clone.zip
+### Exemple minimal (même congrès)
 
-# Ou sans uv
-python -m digdash_cloner --backup-zip backup_source.zip --congress EuroPCR --src-year 2025 --dst-year 2026 --output backup_clone.zip
+```bash
+uv run digdash_cloner \
+  --backup-zip backup_source.zip \  # Backup de DigDash
+  --congress EuroPCR \              # Congrès d'origine
+  --src-year 2025 \                 # Année d'origine
+  --dst-year 2026 \                 # Année de sortie
+  --output backup_clone.zip         # Nom du fichier de sortie
+```
+
+### Exemple complet (renommage de congrès)
+
+```bash
+uv run  digdash_cloner \
+  --backup-zip backup_source.zip \  # Backup de DigDash
+  --congress PCRLondonValves \      # Nom du congrès source
+  --dst-congress EuroPCR \          # Nom du congrès de sortie
+  --src-year 2025 \                 # Année source
+  --dst-year 2026 \                 # Année de sortie
+  --csv-path replace \              # Fonctionnement des sources de données
+  --output backup_clone.zip \       # Nom du fichier de sortie
+  --verbose                         # Logs dans la console
 ```
 
 ## Développement
