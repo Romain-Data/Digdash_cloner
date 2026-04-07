@@ -87,6 +87,7 @@ Thumbs.db
 # Project specific
 backup_*.zip
 *.zip
+.github/
 
 backup_euro_2025.zip
 .ruff_cache
