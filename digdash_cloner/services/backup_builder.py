@@ -4,15 +4,19 @@ Service pour assembler le backup final avec les éléments clonés.
 Suit les principes SRP (assemblage uniquement), OCP (extensible pour d'autres intégrations), DIP (dépend d'abstractions).
 """
 
+from __future__ import annotations
+
 import copy
 import time
 import xml.etree.ElementTree as ET
 import zipfile
-from typing import List
+from typing import TYPE_CHECKING
 
-from ..models.backup import Backup
-from ..models.clone_result import CloneResult
 from ..utils.xml_utils import log, serialize
+
+if TYPE_CHECKING:
+    from ..models.backup import Backup
+    from ..models.clone_result import CloneResult
 
 
 class BackupBuilder:
@@ -21,10 +25,39 @@ class BackupBuilder:
     Suit DIP en dépendant des modèles et utilitaires.
     """
 
+    def _append_models(self, result, new_dm_root, dm_file):
+        for m in result.cloned_models:
+            new_dm_root.append(m)
+        if dm_file is not None:
+            for m in result.cloned_models:
+                item = ET.SubElement(dm_file, "item")
+                item.set("id", m.get("id"))
+                item.set("name", m.get("name", ""))
+
+    def _append_flows(self, result, new_wl_root, wl_file):
+        for f in result.cloned_flows:
+            new_wl_root.append(f)
+        if wl_file is not None:
+            for f in result.cloned_flows:
+                cat = f.find("Category")
+                cat_name = cat.get("Name", "") if cat is not None else ""
+                item = ET.SubElement(wl_file, "item")
+                item.set("id", f.get("uid"))
+                item.set("name", f"{cat_name}/{f.get('name', '')}")
+
+    def _append_pages(self, result, new_db_root, db_file):
+        for p in result.cloned_pages:
+            new_db_root.append(p)
+        if db_file is not None:
+            for p in result.cloned_pages:
+                item = ET.SubElement(db_file, "item")
+                item.set("id", p.get("uid"))
+                item.set("name", p.get("id", ""))
+
     def build_backup(
         self,
         backup: Backup,
-        clone_results: List[CloneResult],
+        clone_results: list[CloneResult],
         output_path: str,
         verbose: bool = False,
     ) -> str:
@@ -65,34 +98,9 @@ class BackupBuilder:
             dst_year = result.dst_year
             log(f"Intégration {congress}/{dst_year}...", verbose)
 
-            # Modèles de données
-            for m in result.cloned_models:
-                new_dm_root.append(m)
-            if dm_file is not None:
-                for m in result.cloned_models:
-                    item = ET.SubElement(dm_file, "item")
-                    item.set("id", m.get("id"))
-                    item.set("name", m.get("name", ""))
-
-            # Flux du wallet
-            for f in result.cloned_flows:
-                new_wl_root.append(f)
-            if wl_file is not None:
-                for f in result.cloned_flows:
-                    cat = f.find("Category")
-                    cat_name = cat.get("Name", "") if cat is not None else ""
-                    item = ET.SubElement(wl_file, "item")
-                    item.set("id", f.get("uid"))
-                    item.set("name", f"{cat_name}/{f.get('name', '')}")
-
-            # Pages dashboard
-            for p in result.cloned_pages:
-                new_db_root.append(p)
-            if db_file is not None:
-                for p in result.cloned_pages:
-                    item = ET.SubElement(db_file, "item")
-                    item.set("id", p.get("uid"))
-                    item.set("name", p.get("id", ""))
+            self._append_models(result, new_dm_root, dm_file)
+            self._append_flows(result, new_wl_root, wl_file)
+            self._append_pages(result, new_db_root, db_file)
 
         # ── Sérialisation ─────────────────────────────────────────────────────────
         dm_bytes = serialize(
@@ -107,7 +115,6 @@ class BackupBuilder:
         bk_bytes = serialize(new_bk_root)
 
         # ── Construction du ZIP ───────────────────────────────────────────────────
-        role_path = f"backup/config/roles/{role_id}"
         dm_key = backup.dm_key
         wl_key = backup.wl_key
         db_key = backup.db_key

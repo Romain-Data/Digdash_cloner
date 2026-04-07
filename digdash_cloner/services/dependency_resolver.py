@@ -4,8 +4,12 @@ Service pour résoudre les dépendances entre modèles de données.
 Suit les principes SRP (résolution de dépendances uniquement) et DIP (travaille avec des dicts abstraits).
 """
 
-import xml.etree.ElementTree as ET
-from typing import Dict, Set
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import xml.etree.ElementTree as ET
 
 
 class DependencyResolver:
@@ -15,8 +19,8 @@ class DependencyResolver:
     """
 
     def resolve_deps(
-        self, dm_id: str, all_models: Dict[str, ET.Element], visited: Set[str] = None
-    ) -> Set[str]:
+        self, dm_id: str, all_models: dict[str, ET.Element], visited: set[str] = None
+    ) -> set[str]:
         """
         Remonte récursivement toute la chaîne de dépendances d'un modèle
         (JOIN, MERGE, COLTRANS).

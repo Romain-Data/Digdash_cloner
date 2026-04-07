@@ -4,9 +4,10 @@ Service pour charger un backup DigDash depuis un ZIP.
 Suit les principes SRP (chargement uniquement) et DIP (dépend d'abstractions comme zipfile).
 """
 
-import xml.etree.ElementTree as ET
 import zipfile
 from collections import defaultdict
+
+from defusedxml.ElementTree import fromstring as safe_fromstring
 
 from ..models.backup import Backup
 
@@ -49,11 +50,12 @@ class BackupLoader:
         }
 
         if len(role_ids) != 1:
-            raise ValueError(
-                f"Impossible de détecter le rôle unique. "
+            message = (
+                "Impossible de détecter le rôle unique. "
                 f"Rôles complets trouvés : {role_ids} "
                 f"(rôles incomplets ignorés : {set(role_files) - role_ids})"
             )
+            raise ValueError(message)
         role_id = next(iter(role_ids))
 
         # Chemins des fichiers clés
@@ -72,8 +74,8 @@ class BackupLoader:
             db_key=db_key,
             bk_key=bk_key,
             all_files=data,
-            dm_root=ET.fromstring(data[dm_key]),
-            wl_root=ET.fromstring(data[wl_key]),
-            db_root=ET.fromstring(data[db_key]),
-            bk_root=ET.fromstring(data[bk_key]),
+            dm_root=safe_fromstring(data[dm_key]),
+            wl_root=safe_fromstring(data[wl_key]),
+            db_root=safe_fromstring(data[db_key]),
+            bk_root=safe_fromstring(data[bk_key]),
         )

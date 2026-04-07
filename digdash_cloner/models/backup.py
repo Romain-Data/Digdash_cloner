@@ -4,8 +4,10 @@ Modèle pour représenter un backup DigDash chargé.
 """
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
-from typing import Dict
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import xml.etree.ElementTree as ET
 
 
 class Backup:
@@ -21,7 +23,7 @@ class Backup:
         wl_key: str,
         db_key: str,
         bk_key: str,
-        all_files: Dict[str, bytes],
+        all_files: dict[str, bytes],
         dm_root: ET.Element,
         wl_root: ET.Element,
         db_root: ET.Element,

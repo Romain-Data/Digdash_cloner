@@ -3,8 +3,11 @@ digdash_cloner/models/clone_result.py
 Modèle pour représenter le résultat d'un clonage de congrès.
 """
 from __future__ import annotations
-import xml.etree.ElementTree as ET
-from typing import Dict, List
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import xml.etree.ElementTree as ET
 
 
 class CloneResult:
@@ -18,12 +21,12 @@ class CloneResult:
         congress: str,
         src_year: str,
         dst_year: str,
-        cloned_models: List[ET.Element],
-        cloned_flows: List[ET.Element],
-        cloned_pages: List[ET.Element],
-        id_map: Dict[str, str],
-        flow_uid_map: Dict[str, str],
-        page_uid_map: Dict[str, str],
+        cloned_models: list[ET.Element],
+        cloned_flows: list[ET.Element],
+        cloned_pages: list[ET.Element],
+        id_map: dict[str, str],
+        flow_uid_map: dict[str, str],
+        page_uid_map: dict[str, str],
     ):
         self.congress = congress
         self.src_year = src_year

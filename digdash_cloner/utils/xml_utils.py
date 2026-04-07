@@ -4,13 +4,13 @@ Utilitaires pour la manipulation XML.
 Suit le principe SRP : responsabilité unique de sérialisation XML et logging.
 """
 
-import html, re
+import html
+import re
 import xml.etree.ElementTree as ET
 
 _CDATA_ROOT_TAGS = ("RenderingModel", "Root")
 _CDATA_PATTERN = re.compile(
-    r'<Input id="2">(&lt;(?:%s).*?&lt;/(?:%s)&gt;)</Input>'
-    % ("|".join(_CDATA_ROOT_TAGS), "|".join(_CDATA_ROOT_TAGS)),
+    rf'<Input id="2">(&lt;(?:{"|".join(_CDATA_ROOT_TAGS)}).*?&lt;/(?:{"|".join(_CDATA_ROOT_TAGS)})&gt;)</Input>',
     re.DOTALL,
 )
 
