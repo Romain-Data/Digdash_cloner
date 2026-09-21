@@ -6,6 +6,7 @@ Suit les principes SRP (validation uniquement), OCP (extensible pour d'autres r�
 
 from __future__ import annotations
 
+import re
 import zipfile
 from collections import defaultdict
 
@@ -27,14 +28,14 @@ class BackupValidator:
             warnings = self._collect_warnings(dm_root, wl_root, congress_list, dst_year)
 
         ok = len(errors) == 0
-        print("\n── Validation ──────────────────────────────────────────────────────")
+        print("\n-- Validation ------------------------------------------------------")
         if ok:
-            print("  ✅ Tous les fichiers XML/IWT sont valides")
+            print("  [OK] Tous les fichiers XML/IWT sont valides")
         else:
             for e in errors:
-                print(f"  ❌ {e}")
+                print(f"  [ERROR] {e}")
         for w in warnings:
-            print(f"  ⚠️  {w}")
+            print(f"  [WARN] {w}")
         return ok
 
     def _validate_xml_files(self, zf) -> list[str]:
@@ -48,13 +49,13 @@ class BackupValidator:
         return errors
 
     def _load_roots(self, zf):
-        dm_root = safe_fromstring(
-            zf.read(next(n for n in zf.namelist() if "tabledatamodel" in n))
-        )
+        dm_root = safe_fromstring(zf.read(next(n for n in zf.namelist() if "tabledatamodel" in n)))
         wl_root = safe_fromstring(zf.read(next(n for n in zf.namelist() if n.endswith(".iwt"))))
         return dm_root, wl_root
 
-    def _collect_warnings(self, dm_root, wl_root, congress_list: list[str], dst_year: str) -> list[str]:
+    def _collect_warnings(
+        self, dm_root, wl_root, congress_list: list[str], dst_year: str
+    ) -> list[str]:
         dm_ids_by_year = self._build_dm_ids_by_year(dm_root)
         other_dm_ids = self._other_dm_ids(dm_ids_by_year, dst_year)
         return self._find_bad_flow_references(wl_root, congress_list, dst_year, other_dm_ids)
@@ -63,9 +64,9 @@ class BackupValidator:
         dm_ids_by_year = defaultdict(set)
         for m in dm_root.findall("TableDataModel"):
             name = m.get("name", "")
-            for year in ("2024", "2025", "2026", "2027"):
-                if year in name:
-                    dm_ids_by_year[year].add(m.get("id"))
+            years = re.findall(r"\b20\d{2}\b", name)
+            for year in years:
+                dm_ids_by_year[year].add(m.get("id"))
         return dm_ids_by_year
 
     def _other_dm_ids(self, dm_ids_by_year, dst_year: str) -> set[str]:

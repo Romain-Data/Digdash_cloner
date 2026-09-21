@@ -7,7 +7,7 @@ Suit les principes SRP (orchestration uniquement), DIP (dépend d'interfaces des
 import sys
 from pathlib import Path
 
-from .cli.args_parser import parse_args
+from .cli.args_parser import DEFAULTS, parse_args, prompt_user
 from .services.backup_builder import BackupBuilder
 from .services.backup_loader import BackupLoader
 from .services.backup_validator import BackupValidator
@@ -18,20 +18,34 @@ from .services.dependency_resolver import DependencyResolver
 def main():
     args = parse_args()
 
-    print(f"\n{'═' * 60}")
+    # Mode interactif si aucun backup-zip fourni
+    if not args.backup_zip:
+        args = prompt_user()
+
+    print(f"\n{'=' * 60}")
     print("  DigDash Role Cloner")
-    print(f"{'═' * 60}")
+    print(f"{'=' * 60}")
     print(f"  Source   : {args.backup_zip}")
     congress_display = (
         ", ".join(args.congress) if args.congress else "(mono-congrès, catégorie {Année}/...)"
     )
     if args.dst_congress:
-        congress_display = f"{congress_display} → {args.dst_congress}"
+        congress_display = f"{congress_display} -> {args.dst_congress}"
     print(f"  Congrès  : {congress_display}")
-    print(f"  Année    : {args.src_year} → {args.dst_year}")
+    print(f"  Année    : {args.src_year} -> {args.dst_year}")
     print(f"  Chemins  : {args.csv_path}")
+    # Résolution du chemin de sortie par défaut : même dossier que le backup source
+    if not args.output or args.output == DEFAULTS["output"]:
+        try:
+            src_path = Path(args.backup_zip) if args.backup_zip else None
+            if src_path:
+                args.output = str((src_path.parent / DEFAULTS["output"]).resolve())
+        except Exception:
+            # En cas d'erreur, garder la valeur fournie (ou le simple nom par défaut)
+            pass
+
     print(f"  Sortie   : {args.output}")
-    print(f"{'═' * 60}\n")
+    print(f"{'=' * 60}\n")
 
     # Validation
     if args.dst_congress and len(args.congress) > 1:
@@ -92,7 +106,7 @@ def main():
     ok = backup_validator.validate_output(args.output, congresses_to_validate, args.dst_year)
 
     # ── Résumé ────────────────────────────────────────────────────────────────
-    print("\n── Résumé ──────────────────────────────────────────────────────────")
+    print("\n-- Resume ----------------------------------------------------------")
     total_models = sum(len(r.cloned_models) for r in clone_results if r)
     total_flows = sum(len(r.cloned_flows) for r in clone_results if r)
     total_pages = sum(len(r.cloned_pages) for r in clone_results if r)
@@ -101,7 +115,7 @@ def main():
     print(f"  Pages clonées   : {total_pages}")
     size_mb = Path(args.output).stat().st_size / 1_048_576
     print(f"  Taille ZIP      : {size_mb:.1f} Mo")
-    print(f"\n{'✅' if ok else '⚠️ '} Fichier généré : {args.output}\n")
+    print(f"\n{'[OK]' if ok else '[WARN]'} Fichier généré : {args.output}\n")
 
     sys.exit(0 if ok else 1)
 

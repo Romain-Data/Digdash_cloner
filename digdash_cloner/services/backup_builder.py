@@ -30,9 +30,12 @@ class BackupBuilder:
             new_dm_root.append(m)
         if dm_file is not None:
             for m in result.cloned_models:
+                cat = m.find("Category")
+                cat_name = cat.get("Name", "").strip("/") if cat is not None else ""
+                item_name = f"{cat_name}/{m.get('name', '')}" if cat_name else m.get("name", "")
                 item = ET.SubElement(dm_file, "item")
                 item.set("id", m.get("id"))
-                item.set("name", m.get("name", ""))
+                item.set("name", item_name)
 
     def _append_flows(self, result, new_wl_root, wl_file):
         for f in result.cloned_flows:
@@ -40,19 +43,52 @@ class BackupBuilder:
         if wl_file is not None:
             for f in result.cloned_flows:
                 cat = f.find("Category")
-                cat_name = cat.get("Name", "") if cat is not None else ""
+                cat_name = cat.get("Name", "").strip("/") if cat is not None else ""
+                item_name = f"{cat_name}/{f.get('name', '')}" if cat_name else f.get("name", "")
                 item = ET.SubElement(wl_file, "item")
                 item.set("id", f.get("uid"))
-                item.set("name", f"{cat_name}/{f.get('name', '')}")
+                item.set("name", item_name)
 
     def _append_pages(self, result, new_db_root, db_file):
         for p in result.cloned_pages:
+            # Avoid appending pages that would collide by uid with existing pages
+            uid = p.get("uid")
+            if uid and any(
+                existing.get("uid") == uid for existing in new_db_root.findall("Dashboard")
+            ):
+                log(f"Skipping append of page uid={uid} (already present)", False)
+                continue
             new_db_root.append(p)
         if db_file is not None:
+            # Build uid map of all dashboards in the new tree
+            uid_to_dashboard = {
+                d.get("uid"): d for d in new_db_root.findall("Dashboard") if d.get("uid")
+            }
+
+            def get_page_path(d_elem, uid_map=uid_to_dashboard) -> str:
+                path_parts = []
+                curr = d_elem
+                visited = set()
+                while curr is not None:
+                    uid = curr.get("uid")
+                    if not uid or uid in visited:
+                        break
+                    visited.add(uid)
+                    path_parts.append(curr.get("id", ""))
+                    parent_uid = curr.get("parent")
+                    curr = uid_map.get(parent_uid) if parent_uid else None
+                return "/".join(reversed(path_parts))
+
             for p in result.cloned_pages:
+                uid = p.get("uid")
+                name = get_page_path(p)
+                # Avoid duplicating the item entry in the backup manifest
+                if uid and any(item.get("id") == uid for item in db_file.findall("item")):
+                    log(f"Skipping db manifest entry for uid={uid} (already present)", False)
+                    continue
                 item = ET.SubElement(db_file, "item")
-                item.set("id", p.get("uid"))
-                item.set("name", p.get("id", ""))
+                item.set("id", uid)
+                item.set("name", name)
 
     def build_backup(
         self,

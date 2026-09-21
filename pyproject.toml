@@ -16,7 +16,7 @@ classifiers = [
 dependencies = ["defusedxml"]
 
 [project.optional-dependencies]
-dev = ["ruff"]
+dev = ["ruff", "pytest"]
 
 [project.scripts]
 digdash-cloner = "digdash_cloner.main:main"

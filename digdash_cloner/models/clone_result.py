@@ -2,6 +2,7 @@
 digdash_cloner/models/clone_result.py
 Modèle pour représenter le résultat d'un clonage de congrès.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

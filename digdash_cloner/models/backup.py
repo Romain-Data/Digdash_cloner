@@ -2,6 +2,7 @@
 digdash_cloner/models/backup.py
 Modèle pour représenter un backup DigDash chargé.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
