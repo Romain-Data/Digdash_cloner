@@ -454,6 +454,7 @@ class CongressCloner:
         page_uid_map,
         portlet_uid_map,
         flow_uid_map,
+        id_map,
         src_year,
         dst_year,
         congress,
@@ -476,6 +477,12 @@ class CongressCloner:
                 raw = raw.replace(f'uid="{old}"', f'uid="{new}"')
             for old, new in flow_uid_map.items():
                 raw = raw.replace(f'flowId="{old}"', f'flowId="{new}"')
+            for old, new in id_map.items():
+                if old != new:
+                    raw = raw.replace(f'value="{old}"', f'value="{new}"')
+                    raw = raw.replace(f'datasource="{old}"', f'datasource="{new}"')
+                    raw = raw.replace(f'dmId="{old}"', f'dmId="{new}"')
+                    raw = raw.replace(f'Link="{old}"', f'Link="{new}"')
             # Update DashboardRef link attributes to point to new page UIDs
             for old, new in page_uid_map.items():
                 raw = raw.replace(f'link="{old}"', f'link="{new}"')
@@ -624,6 +631,7 @@ class CongressCloner:
             page_uid_map,
             portlet_uid_map,
             flow_uid_map,
+            id_map,
             src_year,
             dst_year,
             congress,

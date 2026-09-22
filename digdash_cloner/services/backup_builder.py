@@ -57,8 +57,27 @@ class BackupBuilder:
                 existing.get("uid") == uid for existing in new_db_root.findall("Dashboard")
             ):
                 log(f"Skipping append of page uid={uid} (already present)", False)
-                continue
             new_db_root.append(p)
+
+        # Update parent containers' DashboardRef elements if needed
+        all_dashboards = {
+            d.get("uid"): d for d in new_db_root.findall("Dashboard") if d.get("uid")
+        }
+        for p in result.cloned_pages:
+            uid = p.get("uid")
+            parent_uid = p.get("parent")
+            if not uid or not parent_uid or parent_uid not in all_dashboards:
+                continue
+            parent_elem = all_dashboards[parent_uid]
+            existing_refs = parent_elem.findall("DashboardRef")
+            if existing_refs and not any(r.get("link") == uid for r in existing_refs):
+                idx = list(parent_elem).index(existing_refs[0])
+                ref_elem = ET.Element("DashboardRef")
+                ref_elem.set("link", uid)
+                parent_elem.insert(idx, ref_elem)
+            elif not existing_refs and parent_elem.get("type") == "container":
+                ref_elem = ET.SubElement(parent_elem, "DashboardRef")
+                ref_elem.set("link", uid)
         if db_file is not None:
             # Build uid map of all dashboards in the new tree
             uid_to_dashboard = {

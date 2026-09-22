@@ -230,3 +230,70 @@ def test_backup_builder_page_manifest_path():
     assert items[0].get("name") == "2026"
     assert items[1].get("id") == "child_uid"
     assert items[1].get("name") == "2026/Inscriptions"
+
+
+def test_backup_builder_parent_dashboard_ref_inserted():
+    """Vérifie que BackupBuilder insère le DashboardRef dans le conteneur parent (congrès)."""
+    builder = BackupBuilder()
+    new_db_root = ET.Element("Dashboards")
+    db_file = ET.Element("file")
+
+    # Conteneur parent racine représentant le congrès avec des DashboardRef existants (2025, 2024)
+    congress_container = ET.Element("Dashboard", id="EuroPCR", uid="congress_uid", type="container")
+    ET.SubElement(congress_container, "DashboardRef", link="year_2025_uid")
+    ET.SubElement(congress_container, "DashboardRef", link="year_2024_uid")
+    new_db_root.append(congress_container)
+
+    # Page clonée 2026 qui a pour parent le congrès
+    year_2026_page = ET.Element("Dashboard", id="2026", uid="year_2026_uid", parent="congress_uid", type="container")
+
+    result = CloneResult(
+        congress="EuroPCR",
+        src_year="2025",
+        dst_year="2026",
+        cloned_models=[],
+        cloned_flows=[],
+        cloned_pages=[year_2026_page],
+        id_map={},
+        flow_uid_map={},
+        page_uid_map={},
+    )
+
+    builder._append_pages(result, new_db_root, db_file)
+
+    refs = congress_container.findall("DashboardRef")
+    assert len(refs) == 3
+    # Le nouveau 2026 doit être inséré en premier
+    assert refs[0].get("link") == "year_2026_uid"
+    assert refs[1].get("link") == "year_2025_uid"
+    assert refs[2].get("link") == "year_2024_uid"
+
+
+def test_clone_pages_datasource_id_replacement():
+    """Vérifie que CongressCloner remplace les IDs de modèles de données (datasource/value/dmId) dans les pages."""
+    cloner = CongressCloner(DependencyResolver())
+    page = safe_fromstring("""<Dashboard id="General Data" uid="old_p_uid">
+        <Base name="Filter" type="dimension" uid="old_portlet_uid">
+            <Parameter name="datasource" value="old_dm_id"/>
+        </Base>
+    </Dashboard>""")
+
+    cloned = cloner._clone_pages(
+        pages_to_clone=[page],
+        page_uid_map={"old_p_uid": "new_p_uid"},
+        portlet_uid_map={"old_portlet_uid": "new_portlet_uid"},
+        flow_uid_map={},
+        id_map={"old_dm_id": "new_dm_id"},
+        src_year="2025",
+        dst_year="2026",
+        congress="EuroPCR",
+        dst_congress="EuroPCR",
+        ts="123456789",
+    )
+
+    assert len(cloned) == 1
+    param = cloned[0].find(".//Parameter[@name='datasource']")
+    assert param is not None
+    assert param.get("value") == "new_dm_id"
+
+
