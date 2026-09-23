@@ -85,12 +85,25 @@ class BackupValidator:
     ) -> list[str]:
         warnings = []
         for congress in congress_list:
-            dst_prefix = f"{congress}/{dst_year}/" if congress else f"{dst_year}/"
+            prefix_slash = f"{congress}/{dst_year}" if congress else dst_year
+            prefix_dash = f"{congress}-{dst_year}" if congress else dst_year
             bad_flows = []
             for f in wl_root.findall("Flow"):
                 cat = f.find("Category")
                 cat_name = cat.get("Name", "") if cat is not None else ""
-                if not cat_name.startswith(dst_prefix):
+                matches = (
+                    cat_name == prefix_slash
+                    or cat_name.startswith(f"{prefix_slash}/")
+                    or (
+                        congress
+                        and (
+                            cat_name == prefix_dash
+                            or cat_name.startswith((f"{prefix_dash}/", f"{prefix_dash}-"))
+                        )
+                    )
+                    or (not congress and cat_name.startswith(f"{dst_year}-"))
+                )
+                if not matches:
                     continue
                 for inp in f.findall("Input"):
                     if inp.get("id") == "1":
@@ -99,7 +112,7 @@ class BackupValidator:
                             bad_flows.append(f.get("name", ""))
             if bad_flows:
                 warnings.append(
-                    f"{congress}/{dst_year} : {len(bad_flows)} flux pointent vers "
+                    f"{congress + '/' if congress else ''}{dst_year} : {len(bad_flows)} flux pointent vers "
                     f"un DM d'une autre année (vérifier manuellement)"
                 )
         return warnings

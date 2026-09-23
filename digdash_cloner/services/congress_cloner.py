@@ -53,28 +53,94 @@ class CongressCloner:
             return f"{congress}/{src_year}/", f"{congress}/{src_year}"
         return f"{src_year}/", src_year
 
-    def _select_flows_to_clone(self, all_flows, src_prefix, src_year):
-        flows_to_clone = []
+    def _select_flows_to_clone(self, all_flows, congress, src_year):
+        """
+        Sélectionne les flux à cloner selon l'ordre de priorité des séparateurs :
+        1. Séparateur slash '/' (ex: EuroPCR/2026, EuroPCR/2026/Registration)
+        2. Séparateur tiret '-' (ex: EuroPCR-2026, EuroPCR-2026/Registration)
+        Pour mono-congrès : '2026', '2026/...', '2026-...'
+        """
+        if congress:
+            # Priorité 1 : Séparateur Slash '/'
+            slash_flows = []
+            prefix_slash = f"{congress}/{src_year}"
+            for f in all_flows:
+                cat = f.find("Category")
+                cat_name = cat.get("Name", "") if cat is not None else ""
+                if cat_name == prefix_slash or cat_name.startswith(f"{prefix_slash}/"):
+                    dm_id = None
+                    for inp in f.findall("Input"):
+                        if inp.get("id") == "1":
+                            dm_id = inp.get("value", "").strip()
+                            break
+                    slash_flows.append((f, cat_name, dm_id))
+            if slash_flows:
+                return slash_flows, "/"
+
+            # Priorité 2 : Séparateur Tiret '-'
+            dash_flows = []
+            prefix_dash = f"{congress}-{src_year}"
+            for f in all_flows:
+                cat = f.find("Category")
+                cat_name = cat.get("Name", "") if cat is not None else ""
+                if (
+                    cat_name == prefix_dash
+                    or cat_name.startswith((f"{prefix_dash}/", f"{prefix_dash}-"))
+                ):
+                    dm_id = None
+                    for inp in f.findall("Input"):
+                        if inp.get("id") == "1":
+                            dm_id = inp.get("value", "").strip()
+                            break
+                    dash_flows.append((f, cat_name, dm_id))
+            if dash_flows:
+                return dash_flows, "-"
+
+            return [], "/"
+
+        mono_flows = []
         for f in all_flows:
             cat = f.find("Category")
             cat_name = cat.get("Name", "") if cat is not None else ""
-            if cat_name.startswith(src_prefix) or cat_name == src_year:
+            if (
+                cat_name == src_year
+                or cat_name.startswith((f"{src_year}/", f"{src_year}-"))
+            ):
                 dm_id = None
                 for inp in f.findall("Input"):
                     if inp.get("id") == "1":
                         dm_id = inp.get("value", "").strip()
                         break
-                flows_to_clone.append((f, cat_name, dm_id))
-        return flows_to_clone
+                mono_flows.append((f, cat_name, dm_id))
+        return mono_flows, "/"
 
     def _confirm_existing_destination_flows(self, all_flows, dst_congress, dst_year):
-        dst_prefix = f"{dst_congress}/{dst_year}/" if dst_congress else f"{dst_year}/"
-        existing_dst_flows = [
-            f
-            for f in all_flows
-            if (f.find("Category") is not None)
-            and f.find("Category").get("Name", "").startswith(dst_prefix)
-        ]
+        if dst_congress:
+            prefix_slash = f"{dst_congress}/{dst_year}"
+            prefix_dash = f"{dst_congress}-{dst_year}"
+            existing_dst_flows = [
+                f
+                for f in all_flows
+                if (f.find("Category") is not None)
+                and (
+                    f.find("Category").get("Name", "") == prefix_slash
+                    or f.find("Category").get("Name", "").startswith(f"{prefix_slash}/")
+                    or f.find("Category").get("Name", "") == prefix_dash
+                    or f.find("Category").get("Name", "").startswith(f"{prefix_dash}/")
+                    or f.find("Category").get("Name", "").startswith(f"{prefix_dash}-")
+                )
+            ]
+        else:
+            existing_dst_flows = [
+                f
+                for f in all_flows
+                if (f.find("Category") is not None)
+                and (
+                    f.find("Category").get("Name", "") == dst_year
+                    or f.find("Category").get("Name", "").startswith(f"{dst_year}/")
+                    or f.find("Category").get("Name", "").startswith(f"{dst_year}-")
+                )
+            ]
         if existing_dst_flows:
             confirm(
                 f"{len(existing_dst_flows)} flux existent déjà pour "
@@ -118,11 +184,15 @@ class CongressCloner:
         return all_dm_ids
 
     def _split_dm_ids(self, all_dm_ids, all_models, src_year):
-        dm_to_clone = {
-            dm_id
-            for dm_id in all_dm_ids
-            if dm_id in all_models and src_year in all_models[dm_id].get("name", "")
-        }
+        dm_to_clone = set()
+        for dm_id in all_dm_ids:
+            if dm_id in all_models:
+                m = all_models[dm_id]
+                m_name = m.get("name", "")
+                cat = m.find("Category")
+                cat_name = cat.get("Name", "") if cat is not None else ""
+                if src_year in m_name or src_year in cat_name:
+                    dm_to_clone.add(dm_id)
         dm_shared = all_dm_ids - dm_to_clone
         return dm_to_clone, dm_shared
 
@@ -230,6 +300,7 @@ class CongressCloner:
         dst_congress,
         ts,
         role_id,
+        matched_sep: str = "/",
     ):
         cloned_flows = []
         for f, _, _ in flows_to_clone:
@@ -240,17 +311,29 @@ class CongressCloner:
                 if old != new:
                     raw = raw.replace(f'value="{old}"', f'value="{new}"')
                     raw = raw.replace(f'dmId="{old}"', f'dmId="{new}"')
-            if congress:
-                raw = raw.replace(f"{congress}/{src_year}/", f"{dst_congress}/{dst_year}/")
-            else:
-                raw = raw.replace(f"{src_year}/", f"{dst_year}/")
-                raw = raw.replace(f'Name="{src_year}"', f'Name="{dst_year}"')
             raw = raw.replace(src_year, dst_year)
             if congress and dst_congress != congress:
                 raw = raw.replace(congress, dst_congress)
             f2 = safe_fromstring(raw)
             f2.set("lastedit", ts)
             f2.set("group", role_id)
+
+            # Normaliser la catégorie pour toujours utiliser '/' à l'export
+            cat = f2.find("Category")
+            if cat is not None:
+                cname = cat.get("Name", "")
+                if congress:
+                    prefix_dash = f"{dst_congress}-{dst_year}"
+                    prefix_slash = f"{dst_congress}/{dst_year}"
+                    if cname == prefix_dash:
+                        cat.set("Name", prefix_slash)
+                    elif cname.startswith((f"{prefix_dash}/", f"{prefix_dash}-")):
+                        sub = cname[len(prefix_dash) + 1 :]
+                        cat.set("Name", f"{prefix_slash}/{sub}")
+                elif cname.startswith(f"{dst_year}-"):
+                    sub = cname[len(dst_year) + 1 :]
+                    cat.set("Name", f"{dst_year}/{sub}")
+
             cloned_flows.append(f2)
         return cloned_flows
 
@@ -290,7 +373,6 @@ class CongressCloner:
             )
             pages_to_clone = self._collect_fallback_pages(all_db_pages, flow_uid_map)
             if pages_to_clone:
-                # If a destination year container already exists, attach cloned pages under it.
                 dest_year_container = self._find_year_container(
                     all_db_pages, dst_year, congress_uid
                 )
@@ -303,8 +385,6 @@ class CongressCloner:
                         new_pages.append(d_clone)
                     pages_to_clone = new_pages
                 else:
-                    # Create a synthetic year container (with id set to dst_year) so cloned pages
-                    # are attached to a new year container under the correct congress.
                     fake_year_uid = str(
                         uid_int(f"fallback_{dst_year}_{int(time.time() * 1000)}", "fallback")
                     )
@@ -312,7 +392,6 @@ class CongressCloner:
                     year_container_elem.set("id", dst_year)
                     year_container_elem.set("uid", fake_year_uid)
                     year_container_elem.set("type", "container")
-                    # attach under detected congress container (prefer destination congress uid)
                     year_container_elem.set("parent", congress_uid or src_congress_uid or "")
                     new_pages = [year_container_elem]
                     for d in pages_to_clone:
@@ -333,42 +412,41 @@ class CongressCloner:
     def _find_congress_container_uid(self, all_db_pages, dst_congress):
         if not dst_congress:
             return ""
-        root_containers = []
         for p in all_db_pages:
-            if p.get("type") == "container" and not p.get("parent"):
-                if p.get("id") == dst_congress:
-                    return p.get("uid", "")
-                root_containers.append(p)
-        # If there is exactly one top-level container, use it as a fallback role container.
-        return root_containers[0].get("uid", "") if len(root_containers) == 1 else ""
+            if p.get("type") == "container" and not p.get("parent") and p.get("id") == dst_congress:
+                return p.get("uid", "")
+        return ""
 
     def _find_src_congress_uid(self, all_db_pages, congress, dst_congress, congress_uid):
-        if congress and congress != dst_congress:
+        if congress:
             for p in all_db_pages:
                 if p.get("id") == congress and p.get("type") == "container" and not p.get("parent"):
                     return p.get("uid", "")
         return congress_uid
 
     def _find_year_container(self, all_db_pages, year, congress_uid):
-        for p in all_db_pages:
-            if (
-                p.get("id") == year
-                and p.get("type") == "container"
-                and p.get("parent", "") == (congress_uid or "")
-            ):
-                return p
-        for p in all_db_pages:
-            if p.get("id") == year and p.get("parent", "") == (congress_uid or ""):
-                return p
-        if not congress_uid:
-            # Fallback: accept a year container or page if no congress container is specified
+        if congress_uid:
             for p in all_db_pages:
-                if p.get("id") == year and p.get("type") == "container":
+                if (
+                    p.get("id") == year
+                    and p.get("type") == "container"
+                    and p.get("parent", "") == congress_uid
+                ):
                     return p
             for p in all_db_pages:
-                if p.get("id") == year:
+                if p.get("id") == year and p.get("parent", "") == congress_uid:
                     return p
-        return None
+            return None
+
+        # Fallback pour mono-congrès
+        match_fallback = None
+        for p in all_db_pages:
+            if p.get("id") == year:
+                if p.get("type") == "container" and not p.get("parent"):
+                    return p
+                if match_fallback is None:
+                    match_fallback = p
+        return match_fallback
 
     def _collect_subtree(self, uid: str, children_map, uid_to_page):
         page = uid_to_page.get(uid)
@@ -536,12 +614,12 @@ class CongressCloner:
         all_flows = wl_root.findall("Flow")
         salt = f"{dst_congress}{dst_year}"
 
-        src_prefix, label = self._compute_source_prefix(congress, src_year)
-        flows_to_clone = self._select_flows_to_clone(all_flows, src_prefix, src_year)
+        label = f"{congress}/{src_year}" if congress else src_year
+        flows_to_clone, matched_sep = self._select_flows_to_clone(all_flows, congress, src_year)
 
         log(f"[{label}] Flux à cloner : {len(flows_to_clone)}", verbose)
         if not flows_to_clone:
-            target = f"{congress}/{src_year}/" if congress else f"{src_year}[/...] ou {src_year}"
+            target = f"{congress}/{src_year} ou {congress}-{src_year}" if congress else f"{src_year}[/...] ou {src_year}"
             print(f"  [WARN] Aucun flux trouvé pour {target}")
             return None
 
@@ -588,6 +666,7 @@ class CongressCloner:
             dst_congress,
             ts,
             role_id,
+            matched_sep,
         )
         log(f"[{label}] Flux clonés : {len(cloned_flows)}", verbose)
 
@@ -604,13 +683,32 @@ class CongressCloner:
         all_db_pages = db_root.findall("Dashboard")
         existing_uids = {p.get("uid") for p in all_db_pages if p.get("uid")}
 
-        # If both source year container and destination year container exist, avoid
-        # cloning the source container itself and map its uid to the existing dest uid
-        extra_mappings = {}
         congress_uid = self._find_congress_container_uid(all_db_pages, dst_congress)
         src_congress_uid = self._find_src_congress_uid(
             all_db_pages, congress, dst_congress, congress_uid
         )
+
+        extra_mappings = {}
+        new_congress_page = None
+
+        if dst_congress:
+            if not congress_uid:
+                congress_uid = str(uid_int(f"congress_{dst_congress}", salt))
+                while congress_uid in existing_uids:
+                    congress_uid = str(int(congress_uid) + 1)
+                existing_uids.add(congress_uid)
+
+                new_congress_page = ET.Element("Dashboard")
+                new_congress_page.set("accessible", "true")
+                new_congress_page.set("desktop", "true")
+                new_congress_page.set("id", dst_congress)
+                new_congress_page.set("lastedit", ts)
+                new_congress_page.set("mobile", "true")
+                new_congress_page.set("type", "container")
+                new_congress_page.set("uid", congress_uid)
+
+            if src_congress_uid:
+                extra_mappings[src_congress_uid] = congress_uid
 
         src_year_container = self._find_year_container(all_db_pages, src_year, src_congress_uid)
         src_year_uid = src_year_container.get("uid") if src_year_container is not None else None
@@ -618,8 +716,9 @@ class CongressCloner:
         dest_year_container = self._find_year_container(all_db_pages, dst_year, congress_uid)
         dest_year_uid = dest_year_container.get("uid") if dest_year_container is not None else None
 
-        # If both exist, filter out the source container from pages_to_clone and map its uid
-        if src_year_uid and dest_year_uid:
+        # If both source year container and destination year container exist AND are different,
+        # avoid cloning the source container itself and map its uid to the existing dest uid
+        if src_year_uid and dest_year_uid and src_year_uid != dest_year_uid:
             pages_to_clone = [p for p in pages_to_clone if p.get("uid") != src_year_uid]
             extra_mappings[src_year_uid] = dest_year_uid
 
@@ -639,36 +738,22 @@ class CongressCloner:
             ts,
         )
 
-        # If we created a new top-level year page or container, give it a unique position
-        # so it does not collide with the source year position and hide the original.
+        if congress_uid:
+            for p in cloned_pages:
+                if p.get("id") == dst_year and p.get("type") == "container":
+                    p.set("parent", congress_uid)
+
+        if new_congress_page is not None:
+            cloned_pages.insert(0, new_congress_page)
+
         root_positions = [
             int(p.get("position", "0").strip() or "0") for p in all_db_pages if not p.get("parent")
         ]
         max_root_position = max(root_positions, default=-1)
         for p in cloned_pages:
-            if p.get("id") == dst_year and not p.get("parent"):
-                p.set("position", str(max_root_position + 1))
+            if not p.get("parent"):
                 max_root_position += 1
-
-        # Ensure the cloned dst_year container is parented under the role/congress container when possible.
-        # Some backups don't use the congress id as the top-level container id, so fall back
-        # to the first top-level container (type=container and no parent) as the role container.
-        role_uid = None
-        top_level_containers = []
-        for p in db_root.findall("Dashboard"):
-            if p.get("type") == "container" and not p.get("parent"):
-                # prefer a non-numeric id (likely the role name)
-                if p.get("id") and not p.get("id").isdigit():
-                    role_uid = p.get("uid")
-                    break
-                top_level_containers.append(p)
-        if role_uid is None and len(top_level_containers) == 1:
-            role_uid = top_level_containers[0].get("uid")
-
-        if role_uid:
-            for p in cloned_pages:
-                if p.get("id") == dst_year and (not p.get("parent") or p.get("parent") == ""):
-                    p.set("parent", role_uid)
+                p.set("position", str(max_root_position))
 
         log(f"[{label}] Pages clonées : {len(cloned_pages)}", verbose)
 
