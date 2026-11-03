@@ -20,13 +20,13 @@ class Backup:
     def __init__(
         self,
         role_id: str,
-        dm_key: str,
-        wl_key: str,
+        dm_key: str | None,
+        wl_key: str | None,
         db_key: str,
         bk_key: str,
         all_files: dict[str, bytes],
-        dm_root: ET.Element,
-        wl_root: ET.Element,
+        dm_root: ET.Element | None,
+        wl_root: ET.Element | None,
         db_root: ET.Element,
         bk_root: ET.Element,
     ):
@@ -40,3 +40,4 @@ class Backup:
         self.wl_root = wl_root
         self.db_root = db_root
         self.bk_root = bk_root
+        self.dashboard_only = dm_root is None and wl_root is None

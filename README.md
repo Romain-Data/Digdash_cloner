@@ -16,6 +16,13 @@ pip install -e .[dev]
 
 ## Utilisation
 
+### Backup contenant uniquement le dashboard
+
+Si le ZIP ne contient que le fichier dashboard du rôle (sans wallet `.iwt` ni dépôt de modèles
+de données), l'outil détecte automatiquement ce mode et clone uniquement les pages. Les
+références `flowId` existantes sont conservées : aucun flux ni modèle n'est créé ou remappé.
+Utilisez ce mode si les flux visés sont déjà ceux référencés par le dashboard source.
+
 ### Exemple minimal (même congrès)
 
 ```bash

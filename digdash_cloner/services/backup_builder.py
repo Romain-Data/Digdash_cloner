@@ -57,8 +57,35 @@ class BackupBuilder:
                 existing.get("uid") == uid for existing in new_db_root.findall("Dashboard")
             ):
                 log(f"Skipping append of page uid={uid} (already present)", False)
+            insert_idx = None
+            for idx, child in enumerate(list(new_db_root)):
+                if child.tag in ("SpeakableNames", "DashboardCombos"):
+                    insert_idx = idx
+                    break
+            if insert_idx is not None:
+                new_db_root.insert(insert_idx, p)
+            else:
+                new_db_root.append(p)
+
+        # Update parent containers' DashboardRef elements if needed
+        all_dashboards = {
+            d.get("uid"): d for d in new_db_root.findall("Dashboard") if d.get("uid")
+        }
+        for p in result.cloned_pages:
+            uid = p.get("uid")
+            parent_uid = p.get("parent")
+            if not uid or not parent_uid or parent_uid not in all_dashboards:
                 continue
-            new_db_root.append(p)
+            parent_elem = all_dashboards[parent_uid]
+            existing_refs = parent_elem.findall("DashboardRef")
+            if existing_refs and not any(r.get("link") == uid for r in existing_refs):
+                idx = list(parent_elem).index(existing_refs[0])
+                ref_elem = ET.Element("DashboardRef")
+                ref_elem.set("link", uid)
+                parent_elem.insert(idx, ref_elem)
+            elif not existing_refs and parent_elem.get("type") == "container":
+                ref_elem = ET.SubElement(parent_elem, "DashboardRef")
+                ref_elem.set("link", uid)
         if db_file is not None:
             # Build uid map of all dashboards in the new tree
             uid_to_dashboard = {
@@ -90,6 +117,17 @@ class BackupBuilder:
                 item.set("id", uid)
                 item.set("name", name)
 
+            for page in result.cloned_pages:
+                parent_uid = page.get("parent")
+                parent = uid_to_dashboard.get(parent_uid)
+                if parent is None or any(
+                    item.get("id") == parent_uid for item in db_file.findall("item")
+                ):
+                    continue
+                item = ET.SubElement(db_file, "item")
+                item.set("id", parent_uid)
+                item.set("name", get_page_path(parent))
+
     def build_backup(
         self,
         backup: Backup,
@@ -105,13 +143,15 @@ class BackupBuilder:
         ts = str(int(time.time() * 1000))
 
         # ── Construire les nouveaux arbres XML ────────────────────────────────────
-        new_dm_root = copy.deepcopy(backup.dm_root)
-        new_wl_root = copy.deepcopy(backup.wl_root)
+        new_dm_root = copy.deepcopy(backup.dm_root) if backup.dm_root is not None else None
+        new_wl_root = copy.deepcopy(backup.wl_root) if backup.wl_root is not None else None
         new_db_root = copy.deepcopy(backup.db_root)
         new_bk_root = copy.deepcopy(backup.bk_root)
 
-        new_dm_root.set("version", new_dm_root.get("version", ""))
-        new_wl_root.set("lastedit", ts)
+        if new_dm_root is not None:
+            new_dm_root.set("version", new_dm_root.get("version", ""))
+        if new_wl_root is not None:
+            new_wl_root.set("lastedit", ts)
         new_db_root.set("lastedit", ts)
         new_bk_root.set("lastedit", ts)
 
@@ -134,18 +174,28 @@ class BackupBuilder:
             dst_year = result.dst_year
             log(f"Intégration {congress}/{dst_year}...", verbose)
 
-            self._append_models(result, new_dm_root, dm_file)
-            self._append_flows(result, new_wl_root, wl_file)
+            if new_dm_root is not None:
+                self._append_models(result, new_dm_root, dm_file)
+            if new_wl_root is not None:
+                self._append_flows(result, new_wl_root, wl_file)
             self._append_pages(result, new_db_root, db_file)
 
         # ── Sérialisation ─────────────────────────────────────────────────────────
-        dm_bytes = serialize(
-            new_dm_root,
-            '<?xml-stylesheet type="text/xsl" href="staticwebcontent/tools/dminfo.xsl"?>',
+        dm_bytes = (
+            serialize(
+                new_dm_root,
+                '<?xml-stylesheet type="text/xsl" href="staticwebcontent/tools/dminfo.xsl"?>',
+            )
+            if new_dm_root is not None
+            else None
         )
-        wl_bytes = serialize(
-            new_wl_root,
-            '<?xml-stylesheet type="text/xsl" href="staticwebcontent/tools/walletinfo.xsl"?>',
+        wl_bytes = (
+            serialize(
+                new_wl_root,
+                '<?xml-stylesheet type="text/xsl" href="staticwebcontent/tools/walletinfo.xsl"?>',
+            )
+            if new_wl_root is not None
+            else None
         )
         db_bytes = serialize(new_db_root)
         bk_bytes = serialize(new_bk_root)
@@ -163,8 +213,10 @@ class BackupBuilder:
                 zf.writestr(name, content)
 
             zf.writestr(bk_key, bk_bytes)
-            zf.writestr(dm_key, dm_bytes)
-            zf.writestr(wl_key, wl_bytes)
+            if dm_key is not None and dm_bytes is not None:
+                zf.writestr(dm_key, dm_bytes)
+            if wl_key is not None and wl_bytes is not None:
+                zf.writestr(wl_key, wl_bytes)
             zf.writestr(db_key, db_bytes)
 
         log(f"ZIP écrit : {output_path}", verbose)

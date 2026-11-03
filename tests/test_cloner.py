@@ -1,13 +1,99 @@
 import xml.etree.ElementTree as ET  # noqa: N817
+import zipfile
 
 from defusedxml.ElementTree import fromstring as safe_fromstring
 
 from digdash_cloner.models.clone_result import CloneResult
 from digdash_cloner.services.backup_builder import BackupBuilder
+from digdash_cloner.services.backup_loader import BackupLoader
 from digdash_cloner.services.backup_validator import BackupValidator
 from digdash_cloner.services.congress_cloner import CongressCloner
 from digdash_cloner.services.dependency_resolver import DependencyResolver
 from digdash_cloner.utils.uid_generators import uid_hex, uid_int
+
+
+def test_dashboard_only_backup_clones_pages_and_preserves_flow_references(
+    tmp_path, monkeypatch
+):
+    """Vérifie le clonage dashboard seul sans modifier les références de flux."""
+    source_path = tmp_path / "dashboard_only.zip"
+    output_path = tmp_path / "dashboard_clone.zip"
+    dashboard_key = "backup/config/roles/role1/dashboard_role1.xml"
+    dashboard_xml = b"""<Dashboards>
+        <Dashboard id="EuroPCR" uid="c0" type="container" visible="true">
+            <SpeakableNames id="EuroPCR"/>
+            <DashboardRef link="y0"/>
+        </Dashboard>
+        <Dashboard id="2026" uid="y0" parent="c0" type="container" visible="true">
+            <SpeakableNames id="2026"/>
+            <DashboardRef link="p0"/>
+        </Dashboard>
+        <Dashboard id="Overview" uid="p0" parent="y0">
+            <SpeakableNames id="Overview"/>
+            <Base type="flow" uid="port0" flowId="flow-existing"/>
+        </Dashboard>
+        <Dashboard id="AICT-AsiaPCR" uid="target-c" type="container" visible="true">
+            <SpeakableNames id="AICT-AsiaPCR"/>
+            <DashboardRef link="target-y"/>
+        </Dashboard>
+        <Dashboard id="2026" uid="target-y" parent="target-c" type="container" visible="true">
+            <SpeakableNames id="2026"/>
+        </Dashboard>
+    </Dashboards>"""
+    manifest_xml = b"""<backup><files>
+        <file dest="/config/roles/role1/dashboard_role1.xml"
+              name="dashboard_role1.xml" roleId="role1">
+            <item id="c0" name="EuroPCR"/>
+            <item id="y0" name="EuroPCR/2026"/>
+            <item id="p0" name="EuroPCR/2026/Overview"/>
+        </file>
+    </files></backup>"""
+    with zipfile.ZipFile(source_path, "w") as archive:
+        archive.writestr(dashboard_key, dashboard_xml)
+        archive.writestr("backup/backup.xml", manifest_xml)
+
+    backup = BackupLoader().load(str(source_path))
+    assert backup.dashboard_only is True
+    monkeypatch.setattr("builtins.input", lambda _prompt: "o")
+
+    result = CongressCloner(DependencyResolver()).clone_congress(
+        backup=backup,
+        congress="EuroPCR",
+        src_year="2026",
+        dst_year="2026",
+        csv_path_mode="replace",
+        dst_congress="AICT-AsiaPCR",
+    )
+    assert result is not None
+    assert result.cloned_models == []
+    assert result.cloned_flows == []
+
+    BackupBuilder().build_backup(backup, [result], str(output_path))
+    assert BackupValidator().validate_output(
+        str(output_path), ["AICT-AsiaPCR"], "2026"
+    )
+
+    with zipfile.ZipFile(output_path) as archive:
+        names = archive.namelist()
+        assert dashboard_key in names
+        assert not any("tabledatamodelrepository" in name for name in names)
+        assert not any(name.endswith(".iwt") for name in names)
+        output_dashboard = safe_fromstring(archive.read(dashboard_key))
+        cloned_page = next(
+            page for page in output_dashboard.findall("Dashboard") if page.get("id") == "Overview"
+            and page.get("parent") != "y0"
+        )
+        flow_base = cloned_page.find("Base")
+        assert flow_base is not None
+        assert flow_base.get("flowId") == "flow-existing"
+        target_year_item = next(
+            item
+            for item in safe_fromstring(archive.read("backup/backup.xml")).findall(
+                ".//file[@dest='/config/roles/role1/dashboard_role1.xml']/item"
+            )
+            if item.get("id") == "target-y"
+        )
+        assert target_year_item.get("name") == "AICT-AsiaPCR/2026"
 
 
 def test_uid_hex():
@@ -230,3 +316,216 @@ def test_backup_builder_page_manifest_path():
     assert items[0].get("name") == "2026"
     assert items[1].get("id") == "child_uid"
     assert items[1].get("name") == "2026/Inscriptions"
+
+
+def test_backup_builder_parent_dashboard_ref_inserted():
+    """Vérifie que BackupBuilder insère le DashboardRef dans le conteneur parent (congrès)."""
+    builder = BackupBuilder()
+    new_db_root = ET.Element("Dashboards")
+    db_file = ET.Element("file")
+
+    # Conteneur parent racine représentant le congrès avec des DashboardRef existants (2025, 2024)
+    congress_container = ET.Element("Dashboard", id="EuroPCR", uid="congress_uid", type="container")
+    ET.SubElement(congress_container, "DashboardRef", link="year_2025_uid")
+    ET.SubElement(congress_container, "DashboardRef", link="year_2024_uid")
+    new_db_root.append(congress_container)
+
+    # Page clonée 2026 qui a pour parent le congrès
+    year_2026_page = ET.Element("Dashboard", id="2026", uid="year_2026_uid", parent="congress_uid", type="container")
+
+    result = CloneResult(
+        congress="EuroPCR",
+        src_year="2025",
+        dst_year="2026",
+        cloned_models=[],
+        cloned_flows=[],
+        cloned_pages=[year_2026_page],
+        id_map={},
+        flow_uid_map={},
+        page_uid_map={},
+    )
+
+    builder._append_pages(result, new_db_root, db_file)
+
+    refs = congress_container.findall("DashboardRef")
+    assert len(refs) == 3
+    # Le nouveau 2026 doit être inséré en premier
+    assert refs[0].get("link") == "year_2026_uid"
+    assert refs[1].get("link") == "year_2025_uid"
+    assert refs[2].get("link") == "year_2024_uid"
+
+
+def test_clone_pages_datasource_id_replacement():
+    """Vérifie que CongressCloner remplace les IDs de modèles de données (datasource/value/dmId) dans les pages."""
+    cloner = CongressCloner(DependencyResolver())
+    page = safe_fromstring("""<Dashboard id="General Data" uid="old_p_uid">
+        <Base name="Filter" type="dimension" uid="old_portlet_uid">
+            <Parameter name="datasource" value="old_dm_id"/>
+        </Base>
+    </Dashboard>""")
+
+    cloned = cloner._clone_pages(
+        pages_to_clone=[page],
+        page_uid_map={"old_p_uid": "new_p_uid"},
+        portlet_uid_map={"old_portlet_uid": "new_portlet_uid"},
+        flow_uid_map={},
+        id_map={"old_dm_id": "new_dm_id"},
+        src_year="2025",
+        dst_year="2026",
+        congress="EuroPCR",
+        dst_congress="EuroPCR",
+        ts="123456789",
+    )
+
+    assert len(cloned) == 1
+    param = cloned[0].find(".//Parameter[@name='datasource']")
+    assert param is not None
+    assert param.get("value") == "new_dm_id"
+
+
+def test_select_flows_priority():
+    """Vérifie que la priorité slash '/' est appliquée avant le tiret '-'."""
+    cloner = CongressCloner(DependencyResolver())
+
+    flows_xml = """<Wallet>
+        <Flow uid="1"><Category Name="EuroPCR/2026/Sub"/><Input id="1" value="dm1"/></Flow>
+        <Flow uid="2"><Category Name="EuroPCR-2026"/><Input id="1" value="dm2"/></Flow>
+    </Wallet>"""
+    root = safe_fromstring(flows_xml)
+    all_flows = root.findall("Flow")
+
+    # Si slash présent -> sélectionne uniquement les flux slash
+    flows, sep = cloner._select_flows_to_clone(all_flows, "EuroPCR", "2026")
+    assert len(flows) == 1
+    assert flows[0][0].get("uid") == "1"
+    assert sep == "/"
+
+    # Si slash absent -> sélectionne les flux tiret
+    flows_dash_xml = """<Wallet>
+        <Flow uid="2"><Category Name="EuroPCR-2026"/><Input id="1" value="dm2"/></Flow>
+        <Flow uid="3"><Category Name="EuroPCR-2026/Registration"/><Input id="1" value="dm3"/></Flow>
+    </Wallet>"""
+    root_dash = safe_fromstring(flows_dash_xml)
+    flows_dash, sep_dash = cloner._select_flows_to_clone(root_dash.findall("Flow"), "EuroPCR", "2026")
+    assert len(flows_dash) == 2
+    assert sep_dash == "-"
+
+
+def test_clone_flows_slash_export_normalization():
+    """Vérifie que les catégories avec tiret sont exportées avec un slash '/'."""
+    cloner = CongressCloner(DependencyResolver())
+    flows_xml = """<Wallet>
+        <Flow uid="1" name="F1"><Category Name="EuroPCR-2026"/><Input id="1" value="dm1"/></Flow>
+        <Flow uid="2" name="F2"><Category Name="EuroPCR-2026/Registration"/><Input id="1" value="dm2"/></Flow>
+    </Wallet>"""
+    root = safe_fromstring(flows_xml)
+    flows = [(f, f.find("Category").get("Name"), f.find("Input").get("value")) for f in root.findall("Flow")]
+    flow_uid_map = {"1": "10", "2": "20"}
+    id_map = {"dm1": "dm1_new", "dm2": "dm2_new"}
+
+    cloned = cloner._clone_flows(
+        flows_to_clone=flows,
+        flow_uid_map=flow_uid_map,
+        id_map=id_map,
+        congress="EuroPCR",
+        src_year="2026",
+        dst_year="2026",
+        dst_congress="PCRLondonValves",
+        ts="12345",
+        role_id="role1",
+        matched_sep="-",
+    )
+
+    assert len(cloned) == 2
+    cat1 = cloned[0].find("Category").get("Name")
+    cat2 = cloned[1].find("Category").get("Name")
+    assert cat1 == "PCRLondonValves/2026"
+    assert cat2 == "PCRLondonValves/2026/Registration"
+
+
+def test_clone_creates_new_target_congress_hierarchy():
+    """Vérifie que cloner vers un congrès cible inexistant crée le conteneur congrès et range l'année et les pages dessous."""
+    cloner = CongressCloner(DependencyResolver())
+
+    # Dashboard XML simulé avec seulement EuroPCR -> 2026 -> Filters
+    euro_congress = ET.Element("Dashboard", id="EuroPCR", uid="c_euro", type="container")
+    ET.SubElement(euro_congress, "DashboardRef", link="y_2026")
+    year_2026 = ET.Element("Dashboard", id="2026", uid="y_2026", parent="c_euro", type="container")
+    ET.SubElement(year_2026, "DashboardRef", link="p_filters")
+    page_filters = ET.Element("Dashboard", id="Filters", uid="p_filters", parent="y_2026")
+
+    db_root = ET.Element("Dashboards")
+    db_root.extend([euro_congress, year_2026, page_filters])
+
+    flow_elem = safe_fromstring('<Flow uid="f1"><Category Name="EuroPCR/2026"/><Input id="1" value="dm1"/></Flow>')
+    wl_root = ET.Element("Wallet")
+    wl_root.append(flow_elem)
+
+    dm_elem = safe_fromstring('<TableDataModel id="dm1" name="Data 2026"/>')
+    dm_root = ET.Element("TableDataModels")
+    dm_root.append(dm_elem)
+
+    from digdash_cloner.models.backup import Backup
+    backup = Backup(
+        role_id="role1",
+        dm_key="dm.xml",
+        wl_key="wl.iwt",
+        db_key="db.xml",
+        bk_key="backup.xml",
+        all_files={},
+        dm_root=dm_root,
+        wl_root=wl_root,
+        db_root=db_root,
+        bk_root=ET.Element("Backup"),
+    )
+
+    result = cloner.clone_congress(
+        backup=backup,
+        congress="EuroPCR",
+        src_year="2026",
+        dst_year="2026",
+        csv_path_mode="replace",
+        dst_congress="PCRLondonValves",
+    )
+
+    assert result is not None
+    cloned_pages = result.cloned_pages
+
+    # Doit contenir : le conteneur PCRLondonValves, le conteneur 2026 et la page Filters
+    ids = [p.get("id") for p in cloned_pages]
+    assert "PCRLondonValves" in ids
+    assert "2026" in ids
+    assert "Filters" in ids
+
+    # Vérification de la parenté
+    london_container = next(p for p in cloned_pages if p.get("id") == "PCRLondonValves")
+    cloned_year = next(p for p in cloned_pages if p.get("id") == "2026")
+    cloned_filters = next(p for p in cloned_pages if p.get("id") == "Filters")
+
+    assert london_container.get("parent") is None or london_container.get("parent") == ""
+    assert london_container.get("visible") == "true"
+    assert london_container.get("vizType") == "tab"
+    assert london_container.find("SpeakableNames") is not None
+    assert london_container.find("SpeakableNames").get("id") == "PCRLondonValves"
+    assert cloned_year.get("parent") == london_container.get("uid")
+    assert cloned_filters.get("parent") == cloned_year.get("uid")
+
+
+def test_split_dm_ids_by_category_year():
+    """Vérifie que les modèles sans l'année dans leur nom mais avec l'année dans <Category> sont bien clonés."""
+    cloner = CongressCloner(DependencyResolver())
+
+    m1 = safe_fromstring("""<TableDataModel id="m1" name="Modèle final PCR IP's">
+        <Category Name="EuroPCR/2025" />
+    </TableDataModel>""")
+    m2 = safe_fromstring("""<TableDataModel id="m2" name="Modèle générique partagé">
+        <Category Name="Shared" />
+    </TableDataModel>""")
+
+    all_models = {"m1": m1, "m2": m2}
+    dm_to_clone, dm_shared = cloner._split_dm_ids({"m1", "m2"}, all_models, src_year="2025")
+
+    assert "m1" in dm_to_clone
+    assert "m2" in dm_shared
+
+

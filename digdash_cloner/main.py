@@ -67,6 +67,8 @@ def main():
         print(f"❌ Erreur au chargement : {e}")
         sys.exit(1)
     print(f"  Rôle détecté : {backup.role_id}")
+    if backup.dashboard_only:
+        print("  Mode         : dashboard seul (références aux flux existants conservées)")
 
     # ── Clonage ───────────────────────────────────────────────────────────────
     print("\nClonage en cours...")
@@ -78,15 +80,19 @@ def main():
         if args.dst_congress:
             label += f" → {dst_congress}"
         print(f"\n  Congrès : {label}")
-        result = congress_cloner.clone_congress(
-            backup=backup,
-            congress=congress,
-            src_year=args.src_year,
-            dst_year=args.dst_year,
-            csv_path_mode=args.csv_path,
-            dst_congress=dst_congress,
-            verbose=args.verbose,
-        )
+        try:
+            result = congress_cloner.clone_congress(
+                backup=backup,
+                congress=congress,
+                src_year=args.src_year,
+                dst_year=args.dst_year,
+                csv_path_mode=args.csv_path,
+                dst_congress=dst_congress,
+                verbose=args.verbose,
+            )
+        except ValueError as e:
+            print(f"❌ Erreur pendant le clonage : {e}")
+            sys.exit(1)
         clone_results.append(result)
 
     # ── Assemblage ────────────────────────────────────────────────────────────

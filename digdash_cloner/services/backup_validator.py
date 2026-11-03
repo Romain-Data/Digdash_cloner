@@ -25,7 +25,11 @@ class BackupValidator:
         with zipfile.ZipFile(output_path) as zf:
             errors = self._validate_xml_files(zf)
             dm_root, wl_root = self._load_roots(zf)
-            warnings = self._collect_warnings(dm_root, wl_root, congress_list, dst_year)
+            warnings = (
+                self._collect_warnings(dm_root, wl_root, congress_list, dst_year)
+                if dm_root is not None and wl_root is not None
+                else []
+            )
 
         ok = len(errors) == 0
         print("\n-- Validation ------------------------------------------------------")
@@ -43,14 +47,24 @@ class BackupValidator:
         for name in zf.namelist():
             if name.endswith((".xml", ".iwt")):
                 try:
-                    safe_fromstring(zf.read(name))
+                    root = safe_fromstring(zf.read(name))
+                    if "dashboard" in name.lower() and name.endswith(".xml"):
+                        for d in root.findall(".//Dashboard"):
+                            d_id = d.get("id", "")
+                            if d.find("SpeakableNames") is None:
+                                errors.append(f"Dashboard XML structure : balise <SpeakableNames> manquante pour le Dashboard '{d_id}' (uid={d.get('uid')})")
+                            if d.get("parent") is None and d.get("visible") != "true":
+                                errors.append(f"Dashboard XML structure : attribut 'visible' manquant ou non activé sur le Dashboard conteneur '{d_id}' (uid={d.get('uid')})")
                 except (ParseError, ValueError) as e:
                     errors.append(f"XML invalide : {name} → {e}")
         return errors
 
     def _load_roots(self, zf):
-        dm_root = safe_fromstring(zf.read(next(n for n in zf.namelist() if "tabledatamodel" in n)))
-        wl_root = safe_fromstring(zf.read(next(n for n in zf.namelist() if n.endswith(".iwt"))))
+        names = zf.namelist()
+        dm_key = next((n for n in names if "tabledatamodel" in n), None)
+        wl_key = next((n for n in names if n.endswith(".iwt")), None)
+        dm_root = safe_fromstring(zf.read(dm_key)) if dm_key else None
+        wl_root = safe_fromstring(zf.read(wl_key)) if wl_key else None
         return dm_root, wl_root
 
     def _collect_warnings(
@@ -85,12 +99,25 @@ class BackupValidator:
     ) -> list[str]:
         warnings = []
         for congress in congress_list:
-            dst_prefix = f"{congress}/{dst_year}/" if congress else f"{dst_year}/"
+            prefix_slash = f"{congress}/{dst_year}" if congress else dst_year
+            prefix_dash = f"{congress}-{dst_year}" if congress else dst_year
             bad_flows = []
             for f in wl_root.findall("Flow"):
                 cat = f.find("Category")
                 cat_name = cat.get("Name", "") if cat is not None else ""
-                if not cat_name.startswith(dst_prefix):
+                matches = (
+                    cat_name == prefix_slash
+                    or cat_name.startswith(f"{prefix_slash}/")
+                    or (
+                        congress
+                        and (
+                            cat_name == prefix_dash
+                            or cat_name.startswith((f"{prefix_dash}/", f"{prefix_dash}-"))
+                        )
+                    )
+                    or (not congress and cat_name.startswith(f"{dst_year}-"))
+                )
+                if not matches:
                     continue
                 for inp in f.findall("Input"):
                     if inp.get("id") == "1":
@@ -99,7 +126,7 @@ class BackupValidator:
                             bad_flows.append(f.get("name", ""))
             if bad_flows:
                 warnings.append(
-                    f"{congress}/{dst_year} : {len(bad_flows)} flux pointent vers "
+                    f"{congress + '/' if congress else ''}{dst_year} : {len(bad_flows)} flux pointent vers "
                     f"un DM d'une autre année (vérifier manuellement)"
                 )
         return warnings
