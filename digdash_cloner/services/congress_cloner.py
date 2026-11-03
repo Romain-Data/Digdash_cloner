@@ -171,9 +171,9 @@ class CongressCloner:
             confirm(
                 f"Un container dashboard '{dst_year}' existe déjà sous "
                 f"{dst_congress if dst_congress else '(racine)'}. "
-                f"Le backup contiendra deux containers '{dst_year}' après le clonage. "
-                f"Pensez à supprimer les pages dashboard {dst_year} avant de faire ce backup.",
-                abort_msg="Clonage annulé. Nettoyez les pages dashboard puis refaites le backup.",
+                "Les pages clonées seront ajoutées à cette branche et peuvent créer "
+                "des doublons fonctionnels.",
+                abort_msg="Clonage annulé. Vérifiez le dashboard cible avant de relancer.",
             )
 
     def _resolve_model_dependencies(self, flows_to_clone, all_models):
@@ -389,10 +389,20 @@ class CongressCloner:
                         uid_int(f"fallback_{dst_year}_{int(time.time() * 1000)}", "fallback")
                     )
                     year_container_elem = ET.Element("Dashboard")
+                    year_container_elem.set("accessible", "true")
+                    year_container_elem.set("desktop", "true")
                     year_container_elem.set("id", dst_year)
-                    year_container_elem.set("uid", fake_year_uid)
-                    year_container_elem.set("type", "container")
+                    year_container_elem.set("lastedit", str(int(time.time() * 1000)))
+                    year_container_elem.set("mobile", "true")
                     year_container_elem.set("parent", congress_uid or src_congress_uid or "")
+                    year_container_elem.set("position", "0")
+                    year_container_elem.set("type", "container")
+                    year_container_elem.set("uid", fake_year_uid)
+                    year_container_elem.set("visible", "true")
+                    year_container_elem.set("vizType", "tab")
+                    sn_elem = ET.SubElement(year_container_elem, "SpeakableNames")
+                    sn_elem.set("global", "false")
+                    sn_elem.set("id", dst_year)
                     new_pages = [year_container_elem]
                     for d in pages_to_clone:
                         d_clone = safe_fromstring(ET.tostring(d, encoding="unicode"))
@@ -610,20 +620,28 @@ class CongressCloner:
 
         dst_congress = dst_congress or congress
 
-        all_models = {m.get("id"): m for m in dm_root.findall("TableDataModel")}
-        all_flows = wl_root.findall("Flow")
+        all_models = (
+            {m.get("id"): m for m in dm_root.findall("TableDataModel")} if dm_root is not None else {}
+        )
+        all_flows = wl_root.findall("Flow") if wl_root is not None else []
         salt = f"{dst_congress}{dst_year}"
 
         label = f"{congress}/{src_year}" if congress else src_year
-        flows_to_clone, matched_sep = self._select_flows_to_clone(all_flows, congress, src_year)
+        if backup.dashboard_only:
+            flows_to_clone, matched_sep = [], "/"
+        else:
+            flows_to_clone, matched_sep = self._select_flows_to_clone(
+                all_flows, congress, src_year
+            )
 
         log(f"[{label}] Flux à cloner : {len(flows_to_clone)}", verbose)
-        if not flows_to_clone:
+        if not flows_to_clone and not backup.dashboard_only:
             target = f"{congress}/{src_year} ou {congress}-{src_year}" if congress else f"{src_year}[/...] ou {src_year}"
             print(f"  [WARN] Aucun flux trouvé pour {target}")
             return None
 
-        self._confirm_existing_destination_flows(all_flows, dst_congress, dst_year)
+        if not backup.dashboard_only:
+            self._confirm_existing_destination_flows(all_flows, dst_congress, dst_year)
         self._confirm_existing_destination_dashboard(db_root, dst_congress, dst_year)
 
         all_dm_ids = self._resolve_model_dependencies(flows_to_clone, all_models)
@@ -680,6 +698,12 @@ class CongressCloner:
             label,
             verbose,
         )
+        if backup.dashboard_only and not pages_to_clone:
+            message = (
+                f"Aucune page dashboard trouvée pour la source "
+                f"{congress + '/' if congress else ''}{src_year}."
+            )
+            raise ValueError(message)
         all_db_pages = db_root.findall("Dashboard")
         existing_uids = {p.get("uid") for p in all_db_pages if p.get("uid")}
 
@@ -706,6 +730,11 @@ class CongressCloner:
                 new_congress_page.set("mobile", "true")
                 new_congress_page.set("type", "container")
                 new_congress_page.set("uid", congress_uid)
+                new_congress_page.set("visible", "true")
+                new_congress_page.set("vizType", "tab")
+                sn_elem = ET.SubElement(new_congress_page, "SpeakableNames")
+                sn_elem.set("global", "false")
+                sn_elem.set("id", dst_congress)
 
             if src_congress_uid:
                 extra_mappings[src_congress_uid] = congress_uid

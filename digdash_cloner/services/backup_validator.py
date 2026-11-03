@@ -25,7 +25,11 @@ class BackupValidator:
         with zipfile.ZipFile(output_path) as zf:
             errors = self._validate_xml_files(zf)
             dm_root, wl_root = self._load_roots(zf)
-            warnings = self._collect_warnings(dm_root, wl_root, congress_list, dst_year)
+            warnings = (
+                self._collect_warnings(dm_root, wl_root, congress_list, dst_year)
+                if dm_root is not None and wl_root is not None
+                else []
+            )
 
         ok = len(errors) == 0
         print("\n-- Validation ------------------------------------------------------")
@@ -43,14 +47,24 @@ class BackupValidator:
         for name in zf.namelist():
             if name.endswith((".xml", ".iwt")):
                 try:
-                    safe_fromstring(zf.read(name))
+                    root = safe_fromstring(zf.read(name))
+                    if "dashboard" in name.lower() and name.endswith(".xml"):
+                        for d in root.findall(".//Dashboard"):
+                            d_id = d.get("id", "")
+                            if d.find("SpeakableNames") is None:
+                                errors.append(f"Dashboard XML structure : balise <SpeakableNames> manquante pour le Dashboard '{d_id}' (uid={d.get('uid')})")
+                            if d.get("parent") is None and d.get("visible") != "true":
+                                errors.append(f"Dashboard XML structure : attribut 'visible' manquant ou non activé sur le Dashboard conteneur '{d_id}' (uid={d.get('uid')})")
                 except (ParseError, ValueError) as e:
                     errors.append(f"XML invalide : {name} → {e}")
         return errors
 
     def _load_roots(self, zf):
-        dm_root = safe_fromstring(zf.read(next(n for n in zf.namelist() if "tabledatamodel" in n)))
-        wl_root = safe_fromstring(zf.read(next(n for n in zf.namelist() if n.endswith(".iwt"))))
+        names = zf.namelist()
+        dm_key = next((n for n in names if "tabledatamodel" in n), None)
+        wl_key = next((n for n in names if n.endswith(".iwt")), None)
+        dm_root = safe_fromstring(zf.read(dm_key)) if dm_key else None
+        wl_root = safe_fromstring(zf.read(wl_key)) if wl_key else None
         return dm_root, wl_root
 
     def _collect_warnings(

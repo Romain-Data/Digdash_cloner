@@ -1,13 +1,99 @@
 import xml.etree.ElementTree as ET  # noqa: N817
+import zipfile
 
 from defusedxml.ElementTree import fromstring as safe_fromstring
 
 from digdash_cloner.models.clone_result import CloneResult
 from digdash_cloner.services.backup_builder import BackupBuilder
+from digdash_cloner.services.backup_loader import BackupLoader
 from digdash_cloner.services.backup_validator import BackupValidator
 from digdash_cloner.services.congress_cloner import CongressCloner
 from digdash_cloner.services.dependency_resolver import DependencyResolver
 from digdash_cloner.utils.uid_generators import uid_hex, uid_int
+
+
+def test_dashboard_only_backup_clones_pages_and_preserves_flow_references(
+    tmp_path, monkeypatch
+):
+    """Vérifie le clonage dashboard seul sans modifier les références de flux."""
+    source_path = tmp_path / "dashboard_only.zip"
+    output_path = tmp_path / "dashboard_clone.zip"
+    dashboard_key = "backup/config/roles/role1/dashboard_role1.xml"
+    dashboard_xml = b"""<Dashboards>
+        <Dashboard id="EuroPCR" uid="c0" type="container" visible="true">
+            <SpeakableNames id="EuroPCR"/>
+            <DashboardRef link="y0"/>
+        </Dashboard>
+        <Dashboard id="2026" uid="y0" parent="c0" type="container" visible="true">
+            <SpeakableNames id="2026"/>
+            <DashboardRef link="p0"/>
+        </Dashboard>
+        <Dashboard id="Overview" uid="p0" parent="y0">
+            <SpeakableNames id="Overview"/>
+            <Base type="flow" uid="port0" flowId="flow-existing"/>
+        </Dashboard>
+        <Dashboard id="AICT-AsiaPCR" uid="target-c" type="container" visible="true">
+            <SpeakableNames id="AICT-AsiaPCR"/>
+            <DashboardRef link="target-y"/>
+        </Dashboard>
+        <Dashboard id="2026" uid="target-y" parent="target-c" type="container" visible="true">
+            <SpeakableNames id="2026"/>
+        </Dashboard>
+    </Dashboards>"""
+    manifest_xml = b"""<backup><files>
+        <file dest="/config/roles/role1/dashboard_role1.xml"
+              name="dashboard_role1.xml" roleId="role1">
+            <item id="c0" name="EuroPCR"/>
+            <item id="y0" name="EuroPCR/2026"/>
+            <item id="p0" name="EuroPCR/2026/Overview"/>
+        </file>
+    </files></backup>"""
+    with zipfile.ZipFile(source_path, "w") as archive:
+        archive.writestr(dashboard_key, dashboard_xml)
+        archive.writestr("backup/backup.xml", manifest_xml)
+
+    backup = BackupLoader().load(str(source_path))
+    assert backup.dashboard_only is True
+    monkeypatch.setattr("builtins.input", lambda _prompt: "o")
+
+    result = CongressCloner(DependencyResolver()).clone_congress(
+        backup=backup,
+        congress="EuroPCR",
+        src_year="2026",
+        dst_year="2026",
+        csv_path_mode="replace",
+        dst_congress="AICT-AsiaPCR",
+    )
+    assert result is not None
+    assert result.cloned_models == []
+    assert result.cloned_flows == []
+
+    BackupBuilder().build_backup(backup, [result], str(output_path))
+    assert BackupValidator().validate_output(
+        str(output_path), ["AICT-AsiaPCR"], "2026"
+    )
+
+    with zipfile.ZipFile(output_path) as archive:
+        names = archive.namelist()
+        assert dashboard_key in names
+        assert not any("tabledatamodelrepository" in name for name in names)
+        assert not any(name.endswith(".iwt") for name in names)
+        output_dashboard = safe_fromstring(archive.read(dashboard_key))
+        cloned_page = next(
+            page for page in output_dashboard.findall("Dashboard") if page.get("id") == "Overview"
+            and page.get("parent") != "y0"
+        )
+        flow_base = cloned_page.find("Base")
+        assert flow_base is not None
+        assert flow_base.get("flowId") == "flow-existing"
+        target_year_item = next(
+            item
+            for item in safe_fromstring(archive.read("backup/backup.xml")).findall(
+                ".//file[@dest='/config/roles/role1/dashboard_role1.xml']/item"
+            )
+            if item.get("id") == "target-y"
+        )
+        assert target_year_item.get("name") == "AICT-AsiaPCR/2026"
 
 
 def test_uid_hex():
@@ -417,6 +503,10 @@ def test_clone_creates_new_target_congress_hierarchy():
     cloned_filters = next(p for p in cloned_pages if p.get("id") == "Filters")
 
     assert london_container.get("parent") is None or london_container.get("parent") == ""
+    assert london_container.get("visible") == "true"
+    assert london_container.get("vizType") == "tab"
+    assert london_container.find("SpeakableNames") is not None
+    assert london_container.find("SpeakableNames").get("id") == "PCRLondonValves"
     assert cloned_year.get("parent") == london_container.get("uid")
     assert cloned_filters.get("parent") == cloned_year.get("uid")
 
@@ -437,8 +527,5 @@ def test_split_dm_ids_by_category_year():
 
     assert "m1" in dm_to_clone
     assert "m2" in dm_shared
-
-
-
 
 
